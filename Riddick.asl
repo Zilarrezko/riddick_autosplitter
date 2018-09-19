@@ -8,7 +8,7 @@
 └──────────────────────┴───────────┘
  */
 
-// IMPORTANT: This might not work on versions other than the steam version.
+// IMPORTANT: I'm getting reports that the GOG version of the game's autosplitter, and start script isn't working, however load removal is still working
 
 // Todo:
 // - I've been trying to get the final split going, and inventory based splits but I'm not having a whole lot of luck with it.
