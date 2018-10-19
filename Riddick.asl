@@ -8,7 +8,7 @@
 └──────────────────────┴───────────┘
  */
 
-// IMPORTANT: I'm getting reports that the GOG version of the game's autosplitter, and start script isn't working, however load removal is still working
+// IMPORTANT: This game isn't easy to find values for, sometimes things don't work. Just let me know
 
 // Todo:
 // - I've been trying to get the final split going, and inventory based splits but I'm not having a whole lot of luck with it.
@@ -17,11 +17,13 @@
 state("DarkAthena")
 {
 	bool IsLoading: "DarkAthena.exe", 0x0049492C;
-	bool IsPaused: "DarkAthena.exe", 0x0008A5F4, 0x48, 0x28, 0x1C, 0x14, 0x4C, 0x18, 0x14, 0x155;
-	string20 Map: "MSystem.dll", 0x00107E54, 0x00, 0x3C, 0x018C;
-
-	string20 MenuStateString: "DarkAthena.exe", 0x0008A5F4, 0x48, 0x28, 0x1C, 0x14, 0x4C, 0x18, 0x14, 0x40;
+	string20 Map: "DarkAthena.exe", 0x0008A5F4, 0xA0, 0x18, 0x14, 0x3C, 0x18C;
 	
+	// Note: Doesn't seem to work anymore?
+	// bool IsPaused: "DarkAthena.exe", 0x0008A5F4, 0x48, 0x28, 0x1C, 0x14, 0x4C, 0x18, 0x14, 0x155;
+
+	string20 MenuStateString: "DarkAthena.exe", 0x0008A5F4, 0xA0, 0x18, 0x14, 0x3C, 0x18C;
+
 	// Note: This gametime tacs on most of the cutscene times, whether you skip them or not. Some cutscenes don't and special movie cutscenes
 	//       like when you get your eyeshine do not add their time on. It does seem that some cutscenes add more time than they take, however.
 	//  aka. Inconsistent and a hassle
@@ -116,6 +118,7 @@ start
 	   current.Map == "pa1_thedream" &&
 	   !current.IsLoading && old.IsLoading)
 	{
+		print("DEBUG: Start EfBB");
 		vars.Game = "EfBB";
 		vars.Level = 1;
 		Result = true;
@@ -127,6 +130,7 @@ start
 		if(vars.AoDAStartLatch &&
 	       current.GameTime > 40.0)
 		{
+			print("DEBUG: Start AoDA");
 			vars.Game = "AoDA";
 			vars.Level = 1;
 			vars.AoDAStartLatch = false;
@@ -135,6 +139,7 @@ start
 		
 		if(current.GameTime < 1.0)
 		{
+			print("DEBUG: AoDA Start Latch On");
 			vars.AoDAStartLatch = true;
 		}
 	}
