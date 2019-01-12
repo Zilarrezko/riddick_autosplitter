@@ -8,22 +8,15 @@
 └──────────────────────┴───────────┘
  */
 
-// IMPORTANT: This game isn't easy to find values for, sometimes things don't work. Just let me know
-
-// Todo:
-// - I've been trying to get the final split going, and inventory based splits but I'm not having a whole lot of luck with it.
-//   I may just have to call it quits for now and ask for help at a later time. My cheat engine-fu is not strong enough
+// IMPORTANT: Sometimes things don't work. Just let me know
 
 state("DarkAthena")
 {
-	bool IsLoading: "DarkAthena.exe", 0x0049492C;
+	// Note: Not working for others... I will look into a code injection to see if I can get this to work for everyone
 	string20 Map: "DarkAthena.exe", 0x0008A5F4, 0xA0, 0x18, 0x14, 0x3C, 0x18C;
 	
-	// Note: Doesn't seem to work anymore?
-	// bool IsPaused: "DarkAthena.exe", 0x0008A5F4, 0x48, 0x28, 0x1C, 0x14, 0x4C, 0x18, 0x14, 0x155;
-
 	string20 MenuStateString: "DarkAthena.exe", 0x0008A5F4, 0xA0, 0x18, 0x14, 0x3C, 0x18C;
-
+	
 	// Note: This gametime tacs on most of the cutscene times, whether you skip them or not. Some cutscenes don't and special movie cutscenes
 	//       like when you get your eyeshine do not add their time on. It does seem that some cutscenes add more time than they take, however.
 	//  aka. Inconsistent and a hassle
@@ -31,11 +24,82 @@ state("DarkAthena")
 }
 
 init
-{
+{	
 	vars.Game = "";
 	vars.Level = 0;
 	
 	vars.AoDAStartLatch = false;
+	
+	var Module = modules.First();
+	print("[The Chronicles of Riddick] Module Found: " + Module);
+	var SigScan = new SignatureScanner(game, Module.BaseAddress, Module.ModuleMemorySize);
+	print("[The Chronicles of Riddick] Sig Scan");
+	vars.LoadFlagWriteCode = SigScan.Scan(new SigScanTarget(0,
+		0x83, 0x85, 0xB4, 0x12, 0x00, 0x00, 0x01  // Note: add dword ptr [ebp+000012B4], 01
+	));
+	
+	if((int)vars.LoadFlagWriteCode == 0)
+	{
+		throw new Exception("[The Chronicles of Riddick] Load flag writing code couldn't be found");
+	}
+	else
+	{
+		print("[The Chronicles of Riddick] Found where load flag is being written: 0x" + vars.LoadFlagWriteCode.ToString("X"));
+	}
+	
+	vars.MemoryInjectionBase = game.AllocateMemory(0x100);
+	vars.IsLoadingBase = vars.MemoryInjectionBase + 19;
+	print("[The Chronicles of Riddick] Injection Code at: 0x" + vars.MemoryInjectionBase.ToString("X"));
+	
+	var CodeForInjection = new List<byte>()
+	{
+		0x89, 0x2D, /*IsLoadingBase*/          // Note: mov [IsLoadingBase], ebp
+		0x83, 0x85, 0xB4,0x12,0x00,0x00, 0x01, // Note: add dword ptr [ebp+000012B4], 01
+		0x68, /*LoadFlagWriteCode*/             // Note: push [LoadFlagWriteCode] + 7
+		0xC3,                                  // Note: ret
+		0x00, 0x00, 0x00, 0x00,  // Note: This is where IsLoadingBase will be
+	};
+	CodeForInjection.InsertRange( 2, BitConverter.GetBytes((int)vars.IsLoadingBase));
+	CodeForInjection.InsertRange(14, BitConverter.GetBytes((int)vars.LoadFlagWriteCode + 7));
+	
+	var JumpToInjection = new List<byte>()
+	{
+		0x68, /*Base Address for Injected Memory*/ // Note: push [MemoryInjectionBase]
+		0xC3,                                      // Note: ret
+		0x90                                       // Note: nop
+	};
+	JumpToInjection.InsertRange(1, BitConverter.GetBytes((int)vars.MemoryInjectionBase));
+	
+	game.Suspend();
+	print("[The Chronicles of Riddick] Injecting...");
+	game.WriteBytes((IntPtr)vars.LoadFlagWriteCode, JumpToInjection.ToArray());
+	game.WriteBytes((IntPtr)vars.MemoryInjectionBase, CodeForInjection.ToArray());
+	game.Resume();
+	print("[The Chronicles of Riddick] I'm done bro");
+}
+
+update
+{
+	if(vars.IsLoadingBase != null)
+	{
+		vars.BasePointer = memory.ReadValue<IntPtr>((IntPtr)vars.IsLoadingBase);
+		current.IsLoading = memory.ReadValue<byte>((IntPtr)vars.BasePointer + 0x12B4);
+	}
+}
+
+shutdown
+{
+	if(game != null)
+	{
+		var OriginalCode = new List<byte>()
+		{
+			0x83, 0x85, 0xB4, 0x12, 0x00, 0x00, 0x01
+		};
+		game.Suspend();
+		game.WriteBytes((IntPtr)vars.LoadFlagWriteCode, OriginalCode.ToArray());
+		game.Resume();
+		game.FreeMemory((IntPtr)vars.MemoryInjectionBase);
+	}
 }
 
 startup
@@ -116,9 +180,8 @@ start
 	
 	if(settings["EfBB"] &&
 	   current.Map == "pa1_thedream" &&
-	   !current.IsLoading && old.IsLoading)
+	   current.IsLoading == 0 && old.IsLoading == 1)
 	{
-		print("DEBUG: Start EfBB");
 		vars.Game = "EfBB";
 		vars.Level = 1;
 		Result = true;
@@ -130,7 +193,6 @@ start
 		if(vars.AoDAStartLatch &&
 	       current.GameTime > 40.0)
 		{
-			print("DEBUG: Start AoDA");
 			vars.Game = "AoDA";
 			vars.Level = 1;
 			vars.AoDAStartLatch = false;
@@ -139,7 +201,6 @@ start
 		
 		if(current.GameTime < 1.0)
 		{
-			print("DEBUG: AoDA Start Latch On");
 			vars.AoDAStartLatch = true;
 		}
 	}
@@ -149,15 +210,13 @@ start
 
 isLoading
 {
-	return current.IsLoading; // || current.IsPaused;
+	// Note: Value is:
+	//  1 - When loading or skipping a cutscene
+	//  2 - When paused in some menu
+	// >2 - When in other menus... I guess? Based on how far down a menu rabbit hole you are
+	// So it's kind of like IsLoading... But also like an IsPaused or IsMenu
+	return current.IsLoading == 1;
 }
-
-/* Note: To see why this is disabled, see GameTime's comments in state("DarkAthena")
-gameTime
-{
-	return TimeSpan.FromSeconds(current.GameTime);
-}
-*/
 
 split
 {
