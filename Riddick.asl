@@ -13,7 +13,7 @@
 state("DarkAthena")
 {
 	// Note: Not working for others... I will look into a code injection to see if I can get this to work for everyone
-	string20 Map: "DarkAthena.exe", 0x0008A5F4, 0xA0, 0x18, 0x14, 0x3C, 0x18C;
+	// string20 Map: "DarkAthena.exe", 0x0008A5F4, 0xA0, 0x18, 0x14, 0x3C, 0x18C;
 	
 	string20 MenuStateString: "DarkAthena.exe", 0x0008A5F4, 0xA0, 0x18, 0x14, 0x3C, 0x18C;
 	
@@ -30,52 +30,96 @@ init
 	
 	vars.AoDAStartLatch = false;
 	
-	var Module = modules.First();
-	print("[The Chronicles of Riddick] Module Found: " + Module);
-	var SigScan = new SignatureScanner(game, Module.BaseAddress, Module.ModuleMemorySize);
+	var MainModule = modules.First();
+	print("[The Chronicles of Riddick] MainModule Found: " + MainModule);
+	var GameWorldModule = modules.Where(m => m.ModuleName == "GameWorld_Win32_x86.dll").First();
+	print("[The Chronicles of Riddick] GameWorldModule Found: " + GameWorldModule);
+	var MainModuleSigScan = new SignatureScanner(game, MainModule.BaseAddress, MainModule.ModuleMemorySize);
+	var GameWorldSigScan = new SignatureScanner(game, GameWorldModule.BaseAddress, GameWorldModule.ModuleMemorySize);
 	print("[The Chronicles of Riddick] Sig Scan");
-	vars.LoadFlagWriteCode = SigScan.Scan(new SigScanTarget(0,
+	vars.LoadFlagWriteCode = MainModuleSigScan.Scan(new SigScanTarget(0,
 		0x83, 0x85, 0xB4, 0x12, 0x00, 0x00, 0x01  // Note: add dword ptr [ebp+000012B4], 01
 	));
+	vars.MapNameWriteCode = GameWorldSigScan.Scan(new SigScanTarget(0,
+		0x8D, 0x56, 0x04,             // **Note: lea edx, [esi+04]
+		0x8B, 0xC8,                   //   Note: mov ecx, eax
+		0x2B, 0xD1                    //   Note: sub edx, ecx
+	));
+	// vars.MapNameWriteCode = (int)vars.MapNameWriteCode + 0x10;
 	
 	if((int)vars.LoadFlagWriteCode == 0)
-	{
+	{ // Note: This will restart the init script so we can retry memory scanning
 		throw new Exception("[The Chronicles of Riddick] Load flag writing code couldn't be found");
 	}
 	else
 	{
 		print("[The Chronicles of Riddick] Found where load flag is being written: 0x" + vars.LoadFlagWriteCode.ToString("X"));
 	}
+	if((int)vars.MapNameWriteCode == 0)
+	{
+		throw new Exception("[The Chronicles of Riddick] Map name writing code couldn't be found");
+	}
+	else
+	{
+		print("[The Chronicles of Riddick] Found where map name is being written: 0x" + vars.MapNameWriteCode.ToString("X"));
+	}
 	
-	vars.MemoryInjectionBase = game.AllocateMemory(0x100);
-	vars.IsLoadingBase = vars.MemoryInjectionBase + 19;
-	print("[The Chronicles of Riddick] Injection Code at: 0x" + vars.MemoryInjectionBase.ToString("X"));
+	// Todo: Coagulate code within one memory allocation page
+	vars.LoadingFlagInjectionBase = game.AllocateMemory(0x100);
+	vars.IsLoadingBase = vars.LoadingFlagInjectionBase + 0x13;
+	print("[The Chronicles of Riddick] LoadingFlag Injection Code at: 0x" + vars.LoadingFlagInjectionBase.ToString("X"));
+	vars.MapNameInjectionBase = game.AllocateMemory(0x100);
+	vars.MapNameBase = vars.MapNameInjectionBase + 0x13;
+	print("[The Chronicles of Riddick] MapName Injection Code at: 0x" + vars.MapNameInjectionBase.ToString("X"));
 	
-	var CodeForInjection = new List<byte>()
+	var CodeForLoadingFlagInjection = new List<byte>()
 	{
 		0x89, 0x2D, /*IsLoadingBase*/          // Note: mov [IsLoadingBase], ebp
 		0x83, 0x85, 0xB4,0x12,0x00,0x00, 0x01, // Note: add dword ptr [ebp+000012B4], 01
-		0x68, /*LoadFlagWriteCode*/             // Note: push [LoadFlagWriteCode] + 7
+		0x68, /*LoadFlagWriteCode*/            // Note: push [LoadFlagWriteCode] + 7
 		0xC3,                                  // Note: ret
-		0x00, 0x00, 0x00, 0x00,  // Note: This is where IsLoadingBase will be
+		0x00, 0x00, 0x00, 0x00  // Note: This is where IsLoadingBase pointer will be
 	};
-	CodeForInjection.InsertRange( 2, BitConverter.GetBytes((int)vars.IsLoadingBase));
-	CodeForInjection.InsertRange(14, BitConverter.GetBytes((int)vars.LoadFlagWriteCode + 7));
+	CodeForLoadingFlagInjection.InsertRange( 2, BitConverter.GetBytes((int)vars.IsLoadingBase));
+	CodeForLoadingFlagInjection.InsertRange(14, BitConverter.GetBytes((int)vars.LoadFlagWriteCode + 7));
 	
-	var JumpToInjection = new List<byte>()
+	var JumpToLoadingFlagInjection = new List<byte>()
 	{
-		0x68, /*Base Address for Injected Memory*/ // Note: push [MemoryInjectionBase]
-		0xC3,                                      // Note: ret
-		0x90                                       // Note: nop
+		0x68, /*LoadingFlagInjectionBase*/ // Note: push [LoadingFlagInjectionBase]
+		0xC3,                              // Note: ret
+		0x90                               // Note: nop
 	};
-	JumpToInjection.InsertRange(1, BitConverter.GetBytes((int)vars.MemoryInjectionBase));
+	JumpToLoadingFlagInjection.InsertRange(1, BitConverter.GetBytes((int)vars.LoadingFlagInjectionBase));
+	
+	var CodeForMapNameInjection = new List<byte>()
+	{
+		0x8D, 0x56, 0x04,               // Note: lea edx, [esi+04]
+		0x89, 0x15, /*MapNameBase*/     // Note: mov [MapNameBase], edx
+		0x8B, 0xC8,                     // Note: mov ecx, eax
+		0x29, 0xCA,                     // Note: sub edx, ecx
+		0x68, /*MapName injected code*/ // Note: push [MapNameInjectionBase]
+		0xC3,                           // Note: ret
+		0x00, 0x00, 0x00, 0x00 // Note: This will be where MapNameBase pointer will be
+	};
+	CodeForMapNameInjection.InsertRange( 5, BitConverter.GetBytes((int)vars.MapNameBase));
+	CodeForMapNameInjection.InsertRange(14, BitConverter.GetBytes((int)vars.MapNameWriteCode + 7));
+	
+	var JumpToMapNameInjection = new List<byte>()
+	{
+		0x68, /*MapNameInjectionBase*/ // Note: push [MapNameInjectionBase]
+		0xC3,                          // Note: ret
+		0x90                           // Note: nop
+	};
+	JumpToMapNameInjection.InsertRange(1, BitConverter.GetBytes((int)vars.MapNameInjectionBase));
 	
 	game.Suspend();
 	print("[The Chronicles of Riddick] Injecting...");
-	game.WriteBytes((IntPtr)vars.LoadFlagWriteCode, JumpToInjection.ToArray());
-	game.WriteBytes((IntPtr)vars.MemoryInjectionBase, CodeForInjection.ToArray());
+	game.WriteBytes((IntPtr)vars.LoadFlagWriteCode, JumpToLoadingFlagInjection.ToArray());
+	game.WriteBytes((IntPtr)vars.LoadingFlagInjectionBase, CodeForLoadingFlagInjection.ToArray());
+	game.WriteBytes((IntPtr)vars.MapNameWriteCode, JumpToMapNameInjection.ToArray());
+	game.WriteBytes((IntPtr)vars.MapNameInjectionBase, CodeForMapNameInjection.ToArray());
 	game.Resume();
-	print("[The Chronicles of Riddick] I'm done bro");
+	print("[The Chronicles of Riddick] I'm done, bro");
 }
 
 update
@@ -84,6 +128,8 @@ update
 	{
 		vars.BasePointer = memory.ReadValue<IntPtr>((IntPtr)vars.IsLoadingBase);
 		current.IsLoading = memory.ReadValue<byte>((IntPtr)vars.BasePointer + 0x12B4);
+		vars.BasePointer = memory.ReadValue<IntPtr>((IntPtr)vars.MapNameBase);
+		current.Map = memory.ReadString((IntPtr)vars.BasePointer, 20);
 	}
 }
 
@@ -91,14 +137,20 @@ shutdown
 {
 	if(game != null)
 	{
-		var OriginalCode = new List<byte>()
+		var OriginalLoadingFlagCode = new List<byte>()
 		{
 			0x83, 0x85, 0xB4, 0x12, 0x00, 0x00, 0x01
 		};
+		var OriginalMapNameCode = new List<byte>()
+		{
+			0x8D, 0x56, 0x04, 0x8B, 0xC8, 0x2B, 0xD1
+		};
 		game.Suspend();
-		game.WriteBytes((IntPtr)vars.LoadFlagWriteCode, OriginalCode.ToArray());
+		game.WriteBytes((IntPtr)vars.LoadFlagWriteCode, OriginalLoadingFlagCode.ToArray());
+		game.WriteBytes((IntPtr)vars.MapNameWriteCode, OriginalMapNameCode.ToArray());
 		game.Resume();
-		game.FreeMemory((IntPtr)vars.MemoryInjectionBase);
+		game.FreeMemory((IntPtr)vars.LoadingFlagInjectionBase);
+		game.FreeMemory((IntPtr)vars.MapNameInjectionBase);
 	}
 }
 
