@@ -3,8 +3,8 @@
 ┌──────────────────────┤  Created  │
 │    Jesse E Coyle     │ 7/18/2018 │
 ├──────────────────────┼───────────┤
-│   JesseECoyle#2375   │  Discord  │
-│ JesseCoyleE@gmail.com│   Email   │
+│   Zilarrezko#5439    │  Discord  │
+│ jesse@zilarrezko.com │   Email   │
 └──────────────────────┴───────────┘
  */
 
