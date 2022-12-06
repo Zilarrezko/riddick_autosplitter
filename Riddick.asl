@@ -4,7 +4,7 @@
 │    Jesse E Coyle     │ 7/18/2018 │
 ├──────────────────────┼───────────┤
 │   Zilarrezko#5439    │  Discord  │
-│ jesse@zilarrezko.com │   Email   │
+│ jesse@zilarrezko.dev │   Email   │
 └──────────────────────┴───────────┘
  */
 
